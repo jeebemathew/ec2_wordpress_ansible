@@ -22,8 +22,8 @@
         region: "{{region}}"
         keypair: "{{keypair}}"
         count: 1
-        aws_access_key: AKIA52PTJGZMKPIHF5UI
-        aws_secret_key: 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
+        aws_access_key: AKIA52PT***5UI
+        aws_secret_key: SgALdnIuBkD5B****ekL6NQN***EG5aLkf2
       register: ec2_status
 
     - debug:
