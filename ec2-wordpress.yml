@@ -1,0 +1,201 @@
+---
+- name: "EC2_wordpress"
+  hosts: localhost
+  connection: local
+  vars:
+     domain: www.jeebemathew.com     
+     mysql_root: mysqlroot123
+     mysql_database: wordpress
+     mysql_user: wpuser
+     mysql_password: wpuser
+     type: t2.micro
+     image: ami-07c8bc5c1ce9598c3
+     region: us-east-2
+     keypair: jeeec2new
+  tasks:   
+    - name: "Launch_new_EC2"
+      ec2:
+        instance_type: "{{type}}"
+        group_id: sg-059d9fb0c01e6149f
+        image: "{{image}}"
+        wait: true
+        region: "{{region}}"
+        keypair: "{{keypair}}"
+        count: 1
+        aws_access_key: AKIA52PTJGZMKPIHF5UI
+        aws_secret_key: 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
+      register: ec2_status
+
+    - debug:
+        var: item.public_ip
+      with_items: "{{ ec2_status.instances }}"
+       
+    - name: "adding host"
+      add_host:
+          hostname: webserver
+          ansible_host: "{{ ec2_status.instances.0.public_ip }}"
+          ansible_port: 22
+          ansible_user: "ec2-user"
+          ansible_ssh_private_key_file: "/root/ansible.pem"
+          ansible_ssh_common_args: "-o StrictHostKeyChecking=no"    
+
+    - name: "ec2 set time"
+      wait_for:
+         port: 22   
+         host: "{{ ec2_status.instances.0.public_ip }}"
+         timeout: 60
+         state: started
+         delay: 10
+      
+    - name: "Setup LAMP"
+      delegate_to: webserver
+      become: yes
+      yum: name=httpd,php,php-mysql state=present
+     
+
+    - name: "Apache - creating index.html"
+      delegate_to: webserver
+      become: yes
+      copy:
+         content: " <h1>It works..!!</h1>"
+         dest: /var/www/html/index.html
+
+    - name: "Apache - Restarting/Enabling"
+      delegate_to: webserver
+      become: yes
+      service:
+         name: httpd
+         state: restarted
+         enabled: yes
+    - name: "Mariadb-Server - Installation"
+      delegate_to: webserver
+      become: yes
+      yum:
+        name:
+          - mariadb-server
+          - MySQL-python
+        state: present
+
+    
+
+    - name: 'Mariadb-server Restarting/Enabling '
+      delegate_to: webserver
+      become: yes
+      service: name=mariadb state=restarted enabled=yes
+   
+
+    - name: " creating virtualhost"
+      delegate_to: webserver
+      become: yes
+      template:  
+        src: virtualhost.j2
+        dest: /etc/httpd/conf.d/{{domain}}.conf
+
+    - name: "Maria-db server root password reset"
+      delegate_to: webserver
+      become: yes
+      ignore_errors: true
+      mysql_user:
+         login_user: root
+         login_password: ''
+         name: root
+         password: "{{mysql_root}}"
+         host_all: true    
+ 
+    - name: "Removing Anonymous users"
+      delegate_to: webserver
+      become: yes
+      mysql_user:
+         login_user: root
+         login_password: "{{mysql_root}}"
+         name: ''
+         state: absent
+         host_all: true     
+
+    - name: "Creatinig database"
+      delegate_to: webserver
+      become: yes
+      mysql_db:
+         login_user: root
+         login_password: "{{mysql_root}}"
+         name: "{{mysql_database}}"
+         state: present     
+
+    - name: "Mariadb- User add"
+      delegate_to: webserver
+      become: yes
+      mysql_user:
+         login_user: root
+         login_password: "{{mysql_root}}"
+         name: "{{mysql_user}}"
+         password: "{{mysql_password}}"
+         state: present
+         host: localhost
+         priv: "{{mysql_database}}.*:ALL"
+
+    - name: " Creating document root"
+      delegate_to: webserver
+      become: yes
+      file:
+         path: /var/www/html/{{domain}}
+         state: directory
+         owner: apache
+         group: apache
+     
+    - name: "Wordpress downloading"
+      delegate_to: webserver
+      become: yes
+      get_url:
+         url: https://wordpress.org/wordpress-4.9.2.tar.gz
+         dest: /tmp/wordpress.tar.gz  
+
+    - name: "Archiving files"
+      delegate_to: webserver
+      become: yes
+      unarchive:
+           src: /tmp/wordpress.tar.gz
+           dest: /tmp
+           remote_src: yes
+
+    - name: "Copying wordpress contents to document root"
+      delegate_to: webserver
+      become: yes
+      shell: "cp -r /tmp/wordpress/* /var/www/html/{{domain}}"
+
+    - name: "Wordpress- Creating wp-config.php"
+      delegate_to: webserver
+      become: yes
+      template:
+          src: wp-config.php.tmpl
+          dest: /var/www/html/{{ domain }}/wp-config.php    
+  
+    - name: "Wordpress - file ownership "
+      delegate_to: webserver
+      become: yes
+      shell: " chown -R apache:apache /var/www/html/{{domain}}" 
+
+    - name: "Deleting files from /tmp folder "
+      delegate_to: webserver
+      become: yes
+      file:
+         path: "{{ item }}"        
+         state: absent
+      with_items:
+          - /tmp/wordpress.tar.gz
+          - /tmp/wordpress
+
+    - name: "Lampstack - restarting services"
+      delegate_to: webserver
+      become: yes
+      service:
+        name: "{{ item }}"
+        state: restarted
+      with_items:
+             - httpd  
+             - mariadb  
+
+
+
+
+
+              
